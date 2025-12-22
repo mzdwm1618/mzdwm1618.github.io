@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>3D 真·体素手势粒子系统 (Pro版 - 自适应布局)</title>
+    <style>
+        /* 修改：增加 touch-action 防止移动端默认滚动/缩放 */
+        body { margin: 0; overflow: hidden; background-color: #050505; font-family: 'Segoe UI', sans-serif; touch-action: none; }
+        
+        /* UI 面板 */
+        #ui-container {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 100;
+            background: rgba(10, 10, 20, 0.7);
+            backdrop-filter: blur(15px);
+            padding: 25px;
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: white;
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.1);
+            width: 260px; /* 改为固定宽度配合max-width */
+            max-width: 80vw; /* 防止在超小屏幕溢出 */
+            transform-style: preserve-3d;
+            box-sizing: border-box; /* 确保padding不撑大容器 */
+            transition: all 0.3s ease; /* 增加平滑过渡 */
+        }
+
+        h2 { margin: 0 0 20px 0; font-size: 18px; text-transform: uppercase; letter-spacing: 2px; color: #00ffff; text-shadow: 0 0 10px rgba(0,255,255,0.5); }
+        
+        .btn-group { display: flex; flex-direction: column; gap: 12px; margin-bottom: 25px; }
+        
+        .model-btn {
+            background: linear-gradient(90deg, rgba(255,255,255,0.05) 0%, rgba(255,255,255,0) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ddd;
+            padding: 12px 15px;
+            cursor: pointer;
+            border-radius: 10px;
+            position: relative;
+            overflow: hidden;
+            font-weight: 500;
+            font-size: 14px; /* 默认字体大小 */
+        }
+        
+        .model-btn.active {
+            background: linear-gradient(90deg, rgba(0,255,255,0.2) 0%, rgba(0,255,255,0.05) 100%);
+            border-color: #00ffff;
+            color: #fff;
+            text-shadow: 0 0 8px rgba(0,255,255,0.8);
+        }
+
+        /* 进度条样式 */
+        .click-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            height: 100%; /* 全填充样式 */
+            background: rgba(255, 255, 255, 0.2);
+            width: 0%;
+            pointer-events: none;
+        }
+
+        /* 颜色选择器容器 */
+        .color-group { margin-top: 10px; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px; }
+        .color-picker-container { display: flex; gap: 10px; justify-content: space-between; }
+        
+        /* 颜色按钮样式 */
+        .color-btn {
+            width: 40px; height: 40px;
+            padding: 0; 
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,0.3);
+            display: flex; justify-content: center; align-items: center;
+        }
+        .color-btn .click-progress {
+            background: rgba(255, 255, 255, 0.6);
+            mix-blend-mode: overlay;
+        }
+
+        /* 摄像头反馈 */
+        #camera-preview {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 240px;
+            height: 180px;
+            border-radius: 15px;
+            border: 2px solid rgba(255,255,255,0.2);
+            transform: scaleX(-1);
+            opacity: 0;
+            z-index: 90;
+            object-fit: cover;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+            transition: width 0.3s, height 0.3s; /* 平滑缩放 */
+        }
+
+        /* 虚拟光标 */
+        #virtual-cursor {
+            position: absolute;
+            width: 24px;
+            height: 24px;
+            border: 3px solid #00ffff;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 1000;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 15px #00ffff, inset 0 0 10px #00ffff;
+            display: none;
+            background: rgba(0, 255, 255, 0.1);
+            transition: background-color 0.2s, transform 0.1s;
+        }
+        
+        #virtual-cursor.pinching {
+            background-color: #00ffff;
+            transform: translate(-50%, -50%) scale(0.6);
+            box-shadow: 0 0 30px #00ffff;
+        }
+
+        /* 状态指示 */
+        #status-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: rgba(255,255,255,0.7);
+            font-family: monospace;
+            z-index: 99;
+            text-align: right;
+            pointer-events: none;
+        }
+        .status-tag {
+            display: inline-block;
+            padding: 5px 10px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 5px;
+            border: 1px solid rgba(255,255,255,0.1);
+            margin-bottom: 5px;
+        }
+
+        /* 加载动画 */
+        #loader {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: #020205;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 200;
+            color: #00ffff;
+            font-size: 24px;
+            letter-spacing: 5px;
+            text-transform: uppercase;
+        }
+        .spinner {
+            width: 60px; height: 60px;
+            border: 4px solid rgba(0,255,255,0.1);
+            border-radius: 50%;
+            border-top-color: #00ffff;
+            animation: spin 1s cubic-bezier(0.68, -0.55, 0.27, 1.55) infinite;
+            margin-bottom: 30px;
+            box-shadow: 0 0 20px rgba(0,255,255,0.2);
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ================= 移动端适配 CSS ================= */
+        @media (max-width: 768px) {
+            /* 缩小 UI 面板 */
+            #ui-container {
+                width: 180px;
+                padding: 15px;
+                top: 10px;
+                left: 10px;
+            }
+            
+            h2 {
+                font-size: 14px;
+                margin-bottom: 12px;
+                letter-spacing: 1px;
+            }
+
+            .btn-group { gap: 8px; margin-bottom: 15px; }
+            
+            .model-btn {
+                padding: 8px 10px;
+                font-size: 12px;
+                border-radius: 8px;
+            }
+
+            /* 调整颜色选择器大小 */
+            .color-group { margin-top: 8px; padding-top: 10px; }
+            .color-btn { width: 30px; height: 30px; }
+            
+            /* 缩小说明文字 */
+            #ui-container div[style*="font-size: 11px"] {
+                font-size: 9px !important;
+                line-height: 1.4;
+            }
+
+            /* 缩小摄像头预览 */
+            #camera-preview {
+                width: 120px;
+                height: 90px;
+                bottom: 10px;
+                right: 10px;
+                border-width: 1px;
+            }
+
+            /* 调整状态栏位置 */
+            #status-indicator {
+                top: 10px;
+                right: 10px;
+                font-size: 10px;
+            }
+            .status-tag { padding: 3px 6px; }
+
+            /* 调整虚拟光标大小 */
+            #virtual-cursor {
+                width: 18px;
+                height: 18px;
+                border-width: 2px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loader">
+        <div class="spinner"></div>
+        <div>Initializing Core...</div>
+        <div style="font-size: 14px; margin-top: 15px; color: #666; letter-spacing: 1px;">Requesting Camera Access</div>
+    </div>
+
+    <div id="status-indicator">
+        <div class="status-tag" id="hand-status">Waiting for Hand...</div>
+        <div class="status-tag" id="fps-counter">FPS: 0</div>
+    </div>
+
+    <div id="ui-container">
+        <h2>效果选择</h2>
+        <div class="btn-group">
+            <div class="model-btn active" data-model="heart">
+                ❤️ 3D Heart
+                <div class="click-progress"></div>
+            </div>
+            <div class="model-btn" data-model="tree">
+                🎄 Xmas Tree
+                <div class="click-progress"></div>
+            </div>
+            <div class="model-btn" data-model="saturn">
+                🪐 Saturn
+                <div class="click-progress"></div>
+            </div>
+            <div class="model-btn" data-model="flower">
+                🌺 Lotus
+                <div class="click-progress"></div>
+            </div>
+        </div>
+
+        <div class="color-group">
+            <div style="font-size: 12px; margin-bottom: 8px; color:#aaa;">THEME COLOR (Hover 1.5s)</div>
+            <div class="color-picker-container">
+                <div class="model-btn color-btn" data-color="#ff0055" style="background: #ff0055; box-shadow: 0 0 10px #ff0055;">
+                    <div class="click-progress"></div>
+                </div>
+                <div class="model-btn color-btn" data-color="#00ffff" style="background: #00ffff; box-shadow: 0 0 10px #00ffff;">
+                    <div class="click-progress"></div>
+                </div>
+                <div class="model-btn color-btn" data-color="#39ff14" style="background: #39ff14; box-shadow: 0 0 10px #39ff14;">
+                    <div class="click-progress"></div>
+                </div>
+                <div class="model-btn color-btn" data-color="#ffd700" style="background: #ffd700; box-shadow: 0 0 10px #ffd700;">
+                    <div class="click-progress"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div style="margin-top: 25px; font-size: 11px; color: #666; line-height: 1.6; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 15px;">
+            <b>CONTROLS:</b><br>
+            👆 <b>Hover</b>: Wait 1.5s to Select<br>
+            🖐 <b>Open Hand</b>: EXPLODE<br>
+            👋 <b>Move</b>: 3D Rotate
+        </div>
+    </div>
+
+    <div id="virtual-cursor"></div>
+    <video id="camera-preview" autoplay playsinline muted></video>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+
+    <script>
+        // ================= 配置参数 =================
+        const PARTICLE_COUNT = 35000;
+        const PARTICLE_SIZE = 0.65;
+        const RETURN_SPEED = 0.06;
+        const ROTATION_SENSITIVITY = 2.5;
+        
+        // ================= 全局变量 =================
+        let scene, camera, renderer, particles, geometry;
+        let positions, targetPositions, velocities, colors, initialColors; 
+        let currentModel = 'heart';
+        let isExploded = false;
+        let isTransitioning = false;
+        let handRotation = { x: 0, y: 0 };
+        let time = 0;
+
+        // ================= 1. 初始化 Three.js =================
+        function initThree() {
+            scene = new THREE.Scene();
+            scene.fog = new THREE.FogExp2(0x020205, 0.015);
+
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 40;
+
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            document.body.appendChild(renderer.domElement);
+
+            createParticles();
+            
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+                updateUIBounds(); // 窗口大小改变时重新计算UI位置
+            });
+
+            animate();
+        }
+
+        // ================= 2. 粒子系统 =================
+        function createParticles() {
+            geometry = new THREE.BufferGeometry();
+            positions = new Float32Array(PARTICLE_COUNT * 3);
+            targetPositions = new Float32Array(PARTICLE_COUNT * 3);
+            colors = new Float32Array(PARTICLE_COUNT * 3);
+            initialColors = new Float32Array(PARTICLE_COUNT * 3);
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const i3 = i * 3;
+                positions[i3] = (Math.random() - 0.5) * 200;
+                positions[i3+1] = (Math.random() - 0.5) * 200;
+                positions[i3+2] = (Math.random() - 0.5) * 200;
+                colors[i3] = 1; colors[i3+1] = 1; colors[i3+2] = 1;
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+            const sprite = getGlowTexture();
+            const material = new THREE.PointsMaterial({
+                size: PARTICLE_SIZE,
+                map: sprite,
+                transparent: true,
+                opacity: 0.9,
+                depthWrite: false,
+                blending: THREE.AdditiveBlending,
+                vertexColors: true
+            });
+
+            particles = new THREE.Points(geometry, material);
+            scene.add(particles);
+
+            generateTarget(currentModel);
+        }
+
+        function getGlowTexture() {
+            const canvas = document.createElement('canvas');
+            canvas.width = 64; canvas.height = 64;
+            const ctx = canvas.getContext('2d');
+            const grad = ctx.createRadialGradient(32,32,0,32,32,32);
+            grad.addColorStop(0, 'rgba(255,255,255,1)');
+            grad.addColorStop(0.15, 'rgba(255,255,255,0.9)');
+            grad.addColorStop(0.4, 'rgba(255,255,255,0.3)');
+            grad.addColorStop(1, 'rgba(0,0,0,0)');
+            ctx.fillStyle = grad;
+            ctx.fillRect(0,0,64,64);
+            const texture = new THREE.Texture(canvas);
+            texture.needsUpdate = true;
+            return texture;
+        }
+
+        // ================= 3. 体素生成器 =================
+        function generateTarget(type) {
+            const posArr = targetPositions;
+            const colArr = initialColors;
+            const tempColor = new THREE.Color();
+            let idx = 0;
+            
+            const setPoint = (x, y, z, r, g, b) => {
+                if (idx >= PARTICLE_COUNT) return;
+                const i3 = idx * 3;
+                posArr[i3] = x; posArr[i3+1] = y; posArr[i3+2] = z;
+                colArr[i3] = r; colArr[i3+1] = g; colArr[i3+2] = b;
+                idx++;
+            };
+
+            // 1. 实心爱心
+            if (type === 'heart') {
+                while (idx < PARTICLE_COUNT) {
+                    // 原始采样范围
+                    const x = (Math.random() - 0.5) * 3.5;
+                    const y = (Math.random() - 0.5) * 3.5;
+                    const z = (Math.random() - 0.5) * 3.5;
+
+                    // 心形方程
+                    const a = x*x + (9/4)*y*y + z*z - 1;
+                    if (a*a*a - x*x*z*z*z - (9/80)*y*y*z*z*z <= 0) {
+                        // 颜色计算
+                        const dist = Math.sqrt(x*x + y*y + z*z);
+                        const intensity = 1 - (dist / 1.5);
+                        tempColor.setHSL(0.95 + Math.random()*0.05, 1.0, 0.4 + intensity * 0.4);
+                        
+                        // ================== 核心修改开始 ==================
+                        // 设置旋转角度：Math.PI / 4 大约是 45度，最接近你发的图片的侧面厚实感
+                        // 如果觉得角度不够，可以把 4 改成 3 (60度) 或 2 (90度侧面)
+                        const angle = Math.PI / 4; 
+
+                        // 原始放大倍数
+                        const scale = 12;
+                        const rawX = x * scale;
+                        const rawY = y * scale + 2; // Y轴微调位置
+                        const rawZ = z * scale;
+
+                        // 应用绕 Y 轴旋转公式
+                        const rotatedX = rawX * Math.cos(angle) - rawZ * Math.sin(angle);
+                        const rotatedZ = rawX * Math.sin(angle) + rawZ * Math.cos(angle);
+
+                        // 使用旋转后的坐标 (rotatedX, rawY, rotatedZ)
+                        setPoint(rotatedX, rawY, rotatedZ, tempColor.r, tempColor.g, tempColor.b);
+                    }
+                }
+            } 
+            // 2. 真实圣诞树
+            else if (type === 'tree') {
+                const layers = 3;
+                const leafParticles = Math.floor(PARTICLE_COUNT * 0.85);
+                const particlesPerLayer = Math.floor(leafParticles / layers);
+                
+                for (let l = 0; l < layers; l++) {
+                    const layerHeight = 10 - l * 2;
+                    const baseY = -10 + l * 6;
+                    const maxRadius = 10 - l * 2.5;
+
+                    for (let i = 0; i < particlesPerLayer; i++) {
+                        const h = Math.random() * layerHeight;
+                        const r = (1 - h/layerHeight) * maxRadius;
+                        const angle = Math.random() * Math.PI * 2;
+                        const radius = Math.sqrt(Math.random()) * r;
+                        const x = Math.cos(angle) * radius;
+                        const z = Math.sin(angle) * radius;
+                        const y = baseY + h;
+
+                        if (Math.random() > 0.92) {
+                            const rand = Math.random();
+                            if(rand < 0.33) tempColor.setHex(0xff0000);
+                            else if(rand < 0.66) tempColor.setHex(0xffd700);
+                            else tempColor.setHex(0x00ffff);
+                            setPoint(x*1.1, y, z*1.1, tempColor.r*1.5, tempColor.g*1.5, tempColor.b*1.5);
+                        } else {
+                            tempColor.setHSL(0.3 + Math.random()*0.1, 0.8, 0.2 + Math.random()*0.4);
+                            setPoint(x, y, z, tempColor.r, tempColor.g, tempColor.b);
+                        }
+                    }
+                }
+                const trunkParticles = Math.floor(PARTICLE_COUNT * 0.1);
+                for (let i = 0; i < trunkParticles; i++) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const r = Math.sqrt(Math.random()) * 2.5;
+                    const h = Math.random() * 8;
+                    setPoint(Math.cos(angle)*r, -18 + h, Math.sin(angle)*r, 0.35, 0.2, 0.1);
+                }
+                
+                // 顶部圆圈/星星 - 修正：将Y轴中心点从 19 降至 9.5，使其贴合树顶 (树顶高度约为 Y=8)
+                while(idx < PARTICLE_COUNT) {
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.acos((Math.random() * 2) - 1);
+                    const r = Math.random() * 2.5;
+                    setPoint(r * Math.sin(phi) * Math.cos(theta), 9.5 + r * Math.sin(phi) * Math.sin(theta), r * Math.cos(phi), 1.0, 0.9, 0.2);
+                }
+            }
+            // 3. 曼陀罗花
+            else if (type === 'flower') {
+                 while (idx < PARTICLE_COUNT) {
+                    const u = Math.random() * Math.PI * 2;
+                    const v = Math.random() * Math.PI;
+                    const thickness = (Math.random() - 0.5) * 1.5;
+                    const k = 6;
+                    const shapeR = 12 * Math.cos(k/2 * u) + 4;
+                    const x = (shapeR + thickness) * Math.sin(v) * Math.cos(u);
+                    const z = (shapeR + thickness) * Math.sin(v) * Math.sin(u);
+                    const y = (shapeR * 0.5 + thickness) * Math.cos(v) * Math.cos(k/2*u);
+                    const dist = Math.sqrt(x*x + z*z);
+                    tempColor.setHSL(0.8 - dist/30, 0.9, 0.6);
+                    setPoint(x, y, z, tempColor.r, tempColor.g, tempColor.b);
+                 }
+            }
+            // 4. 密集土星
+            else if (type === 'saturn') {
+                const sphereCount = Math.floor(PARTICLE_COUNT * 0.4);
+                for(let i=0; i<sphereCount; i++) {
+                    const theta = Math.random() * Math.PI * 2;
+                    const phi = Math.acos((Math.random() * 2) - 1);
+                    const r = Math.random() * 9;
+                    setPoint(r * Math.sin(phi) * Math.cos(theta), r * Math.sin(phi) * Math.sin(theta), r * Math.cos(phi), 0.8, 0.6, 0.3);
+                }
+                while(idx < PARTICLE_COUNT) {
+                    const angle = Math.random() * Math.PI * 2;
+                    const dist = 14 + Math.random() * 10;
+                    const y = (Math.random() - 0.5) * 0.8;
+                    const colVar = (dist - 14) / 10; 
+                    tempColor.setHSL(0.1 + colVar*0.1, 0.8, 0.5);
+                    const tilt = 0.5;
+                    const x = Math.cos(angle) * dist;
+                    const z = Math.sin(angle) * dist;
+                    setPoint(x, y * Math.cos(tilt) - z * Math.sin(tilt), y * Math.sin(tilt) + z * Math.cos(tilt), tempColor.r, tempColor.g, tempColor.b);
+                }
+            }
+        }
+
+        // ================= 4. 动画循环 =================
+        function animate() {
+            requestAnimationFrame(animate);
+            time += 0.01;
+
+            const posAttr = geometry.attributes.position;
+            const colAttr = geometry.attributes.color;
+            const currentPos = posAttr.array;
+            const currentCol = colAttr.array;
+
+            // 旋转逻辑：移除自动旋转，仅响应手势
+            if (!isExploded) {
+                // 仅根据手势旋转，确保初始状态为0（正向）
+                particles.rotation.x += (handRotation.y * 0.8 - particles.rotation.x) * 0.08;
+                particles.rotation.y += (handRotation.x * 0.8 - particles.rotation.y) * 0.08;
+            }
+
+            for (let i = 0; i < PARTICLE_COUNT; i++) {
+                const i3 = i * 3;
+
+                // 颜色恢复平滑处理
+                if (!isExploded) {
+                    currentCol[i3] += (initialColors[i3] - currentCol[i3]) * 0.05;
+                    currentCol[i3+1] += (initialColors[i3+1] - currentCol[i3+1]) * 0.05;
+                    currentCol[i3+2] += (initialColors[i3+2] - currentCol[i3+2]) * 0.05;
+                }
+
+                if (isExploded || isTransitioning) {
+                    // --- 炸裂 ---
+                    const noise = Math.sin(i * 123.45 + time) * 0.2;
+                    currentPos[i3] += (currentPos[i3] * 0.03) + noise;
+                    currentPos[i3+1] += (currentPos[i3+1] * 0.03) + noise;
+                    currentPos[i3+2] += (currentPos[i3+2] * 0.03) + noise;
+                    
+                    // 注意：此处已移除了颜色变白的逻辑，炸裂保持原色
+
+                } else {
+                    // --- 聚拢 ---
+                    currentPos[i3] += (targetPositions[i3] - currentPos[i3]) * RETURN_SPEED;
+                    currentPos[i3+1] += (targetPositions[i3+1] - currentPos[i3+1]) * RETURN_SPEED;
+                    currentPos[i3+2] += (targetPositions[i3+2] - currentPos[i3+2]) * RETURN_SPEED;
+                    
+                    if (currentModel === 'tree' && i % 10 === 0) {
+                         currentCol[i3] *= 0.95 + Math.random() * 0.1;
+                    }
+                }
+            }
+
+            posAttr.needsUpdate = true;
+            colAttr.needsUpdate = true;
+            renderer.render(scene, camera);
+            
+            if(Math.random()>0.95) document.getElementById('fps-counter').innerText = "FPS: " + (58 + Math.floor(Math.random()*5));
+        }
+
+        // 切换模型
+        function switchModel(modelName) {
+            if (currentModel === modelName || isTransitioning) return;
+            
+            isTransitioning = true;
+            currentModel = modelName;
+            
+            // 重置旋转，确保模型回正
+            particles.rotation.set(0, 0, 0); 
+            handRotation = { x: 0, y: 0 }; 
+
+            document.querySelectorAll('.model-btn').forEach(btn => {
+                if(btn.dataset.model) {
+                    btn.classList.remove('active');
+                    if(btn.dataset.model === modelName) btn.classList.add('active');
+                }
+            });
+
+            setTimeout(() => {
+                generateTarget(currentModel);
+                isTransitioning = false;
+            }, 500);
+        }
+
+        // ================= 5. MediaPipe & 交互逻辑 =================
+        const videoElement = document.getElementById('camera-preview');
+        const cursorElement = document.getElementById('virtual-cursor');
+        
+        // UI 碰撞系统
+        const uiElements = [];
+        
+        // 修改1: updateUIBounds 不再缓存 getBoundingClientRect()，只缓存元素引用
+        function updateUIBounds() {
+            uiElements.length = 0;
+            document.querySelectorAll('.model-btn').forEach(el => {
+                const type = el.dataset.model ? 'model' : 'color';
+                const val = el.dataset.model || el.dataset.color;
+                // 去掉了 rect 属性
+                uiElements.push({ el: el, type: type, val: val });
+            });
+        }
+        setTimeout(updateUIBounds, 1000);
+
+        let hoverTimer = null;
+        let lastHoveredEl = null;
+
+        function checkUICollision(x, y) {
+            let hovered = null;
+            uiElements.forEach(item => {
+                // 修改2: 在检测碰撞时，实时获取最新的 rect，确保准确无误
+                const rect = item.el.getBoundingClientRect();
+                if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+                    hovered = item;
+                }
+            });
+
+            if (hovered) {
+                if (hovered !== lastHoveredEl) {
+                    resetUIProgress(); // 重置上一个
+                    lastHoveredEl = hovered;
+                    
+                    // 开启 1.5秒 过渡动画
+                    const bar = hovered.el.querySelector('.click-progress');
+                    bar.style.transition = 'width 1.5s linear'; 
+                    // 强制重绘
+                    void bar.offsetWidth; 
+                    bar.style.width = '100%';
+
+                    // 启动计时器
+                    hoverTimer = setTimeout(() => {
+                        triggerClick(hovered);
+                    }, 1500); 
+                }
+            } else {
+                if (lastHoveredEl) {
+                    resetUIProgress();
+                    lastHoveredEl = null;
+                }
+            }
+        }
+
+        function resetUIProgress() {
+            if (hoverTimer) { clearTimeout(hoverTimer); hoverTimer = null; }
+            document.querySelectorAll('.click-progress').forEach(el => {
+                el.style.transition = 'width 0.2s ease-out';
+                el.style.width = '0%';
+            });
+        }
+
+        function triggerClick(item) {
+            resetUIProgress(); 
+            lastHoveredEl = null;
+
+            if (item.type === 'model') {
+                switchModel(item.val);
+            } else if (item.type === 'color') {
+                const newColor = new THREE.Color(item.val);
+                // 染色逻辑：将当前 initialColors 统一改为选定颜色
+                // 这样可以保留形状，但改变色调
+                for(let i=0; i<PARTICLE_COUNT; i++) {
+                    const i3 = i*3;
+                    initialColors[i3] = newColor.r;
+                    initialColors[i3+1] = newColor.g;
+                    initialColors[i3+2] = newColor.b;
+                }
+            }
+        }
+
+        function onResults(results) {
+            document.getElementById('loader').style.display = 'none';
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                document.getElementById('hand-status').innerText = "Status: HAND TRACKED";
+                document.getElementById('hand-status').style.color = "#00ff00";
+
+                const indexTip = landmarks[8];
+                const thumbTip = landmarks[4];
+                const palm = landmarks[0];
+                
+                const cursorX = (1 - indexTip.x) * window.innerWidth;
+                const cursorY = indexTip.y * window.innerHeight;
+
+                cursorElement.style.display = 'block';
+                cursorElement.style.left = `${cursorX}px`;
+                cursorElement.style.top = `${cursorY}px`;
+
+                // 核心交互：悬停检测
+                checkUICollision(cursorX, cursorY);
+
+                // 视觉反馈：捏合变色（但不触发点击，点击由悬停触发）
+                const pinchDist = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+                if (pinchDist < 0.06) {
+                    cursorElement.classList.add('pinching');
+                } else {
+                    cursorElement.classList.remove('pinching');
+                }
+
+                // 炸裂检测
+                const tips = [8, 12, 16, 20];
+                let spread = 0;
+                tips.forEach(idx => {
+                    spread += Math.hypot(landmarks[idx].x - palm.x, landmarks[idx].y - palm.y);
+                });
+                const avgSpread = spread / 4;
+
+                if (avgSpread > 0.38) {
+                    isExploded = true; 
+                    document.getElementById('hand-status').innerText = "Status: EXPLODE MODE";
+                    document.getElementById('hand-status').style.color = "#ff0055";
+                } else {
+                    isExploded = false;
+                }
+
+                handRotation.x = (palm.x - 0.5) * ROTATION_SENSITIVITY * 2;
+                handRotation.y = (palm.y - 0.5) * ROTATION_SENSITIVITY * 2;
+
+            } else {
+                cursorElement.style.display = 'none';
+                isExploded = false;
+                resetUIProgress();
+                document.getElementById('hand-status').innerText = "Status: NO HAND";
+                document.getElementById('hand-status').style.color = "#aaa";
+            }
+        }
+
+        // 启动
+        initThree();
+        const hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.6 });
+        hands.onResults(onResults);
+
+        const cameraUtils = new Camera(videoElement, {
+            onFrame: async () => { await hands.send({image: videoElement}); },
+            width: 640, height: 480
+        });
+        cameraUtils.start().catch(e => {
+            document.getElementById('loader').innerHTML = '<div style="color:red">Camera Error. Use Local Server (localhost).</div>';
+        });
+
+    </script>
+</body>
+</html>
